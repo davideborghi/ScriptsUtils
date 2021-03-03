@@ -1,0 +1,1 @@
+Get-Content -Encoding "UTF8" -Path ".\timesheet.DB\*\*.sql" | Set-Content  -Encoding UTF8 "UpdateDB.sql"

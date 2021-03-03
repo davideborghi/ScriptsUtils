@@ -1,0 +1,70 @@
+node {
+	try {
+		def branch="Dev"	// nome del branch, Dev
+		def currentTag="0.0" 					// versione di default
+		def destFolder = "$JENKINS_HOME/jobs/$JOB_NAME/builds/$BUILD_NUMBER/archive"
+		stage('Preparation') { // for display purposes
+			
+			final scmVars = checkout(scm)
+			echo "scmVars: ${scmVars}"
+			echo "scmVars.GIT_COMMIT: ${scmVars.GIT_COMMIT}"
+			echo "scmVars.GIT_PREVIOUS_SUCCESSFUL_COMMIT: ${scmVars.GIT_PREVIOUS_SUCCESSFUL_COMMIT}"
+			echo "scmVars.GIT_BRANCH: ${scmVars.GIT_BRANCH}"
+			
+		  // Get some code from a GitHub repository
+		  git branch: branch, credentialsId: 'Jenkins_Gitlab', url: 'http://fsg-tor1-92.altran.it/sw-hub/isp/timesheet.git'
+		  currentTag = powershell(returnStdout: true, script: '''
+			$tag = git tag --sort=version:refname
+			$tag[-1]
+			''').trim()
+		  echo currentTag
+		  echo env.BUILD_TAG
+	  }
+		stage('CreatingScript'){
+
+			echo "Generazione script"
+            def powershellWrite
+			powershellWrite = powershell (returnStdout: true, script: '''
+    			$tags = git tag --sort=version:refname
+                $files = git diff --name-only --diff-filter=d $tags[-2] $tags[-1] timesheet.DB/*.sql
+                if ($files) {
+                	$currentTag = $tags[-1]
+                    Get-Content -Encoding UTF8 -LiteralPath $files | Set-Content -Encoding UTF8 timesheet.Deploy/DiffScript$currentTag.sql
+
+                
+                }else{
+                    Write-Host "nessuna differenza SQL trovata."
+                }
+
+			''')
+            echo powershellWrite
+			echo "Script generato"
+			def fileName = "DiffScript${currentTag}.sql"
+			
+			echo "sposta file  DiffScript.sql in \"${JENKINS_HOME}/jobs/${JOB_NAME}/builds/${BUILD_NUMBER}/archive/${fileName}\""
+            bat "md \"${destFolder}\" 2> nul"
+            bat """
+            git add -A
+			git commit -m "DiffScript$currentTag"
+			git push origin Dev
+            cd timesheet.Deploy
+            IF EXIST \"${fileName}\" xcopy \"${fileName}\" \"${destFolder}\"
+            """
+            
+
+			
+
+		}
+		notify("SUCCESSFUL")
+	} catch(e) {
+		notify("ERROR")
+		throw e
+	}
+}
+
+def notify(String buildStatus) {
+    def mailRecipients = "davide.borghi@altran.it,antonella.touscoz@altran.it"
+    emailext body: '''<a href="\\\\fsg-tor1-63\\c$\\inetpub\\Applicazioni\\WebAppTest\\CapitalizzazioneISP">Link da cui scaricare il Compilato</a> ${SCRIPT, template="groovy_html.template"}''', 
+             subject: "${buildStatus}: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
+             to: "${mailRecipients}"
+}
